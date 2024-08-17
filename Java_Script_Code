@@ -1,0 +1,112 @@
+////////////////////defining study area////////////////////
+//Selecting the desired study area based on the SHP uploaded
+var roi = roi.filter(ee.Filter.inList('Nomencl', ['SC-20-V-D'])); // pampa:SH-21-X-D, acre: SC-20-V-D, bahia SD-23-V-D  
+
+//centralising visualisation in the study area
+Map.centerObject(roi, 10) 
+ 
+////////////////////defining variables from DEM////////////////////
+//selecting the NASADEM
+var dataset = ee.Image('NASA/NASADEM_HGT/001').clip(roi); 
+
+//creating the elevation variable
+var elev = dataset.select('elevation').reproject('EPSG:4326', null, 30) 
+
+//creating the slope variable
+var slope = ee.Terrain.slope(elev);
+var slp = slope.reproject('EPSG:4326', null, 30)
+
+//Renaming the uploaded variables
+var anthropic = anthropic.rename('anthropic')
+var deforest = deforest.rename('deforest')
+var rodo = rodo.rename('rodo')
+var urban = urban.rename('urban')
+var water = water.rename('water')
+
+//Creating a data cube with all the conditioning variables
+var cb = anthropic.addBands(deforest)
+             .addBands(elev)
+             .addBands(rodo)
+             .addBands(slp)
+             .addBands(urban)
+             .addBands(water) 
+
+////////////////////defining vegetation suppressions////////////////////
+//selecting the land use map of the first year
+var image_t = ee.Image('projects/mapbiomas-workspace/public/collection8/mapbiomas_collection80_integration_v1')
+                   .clip(roi) 
+                   .select('classification_1990'); 
+
+//reclassifying the land use map
+//creating a list of land use classes from the classification
+var fromList = [0 ,3, 4, 5, 6, 49, 11, 12, 50, 32, 29, 13, 15, 18, 19, 39, 20, 40, 62, 41, 36, 46, 47, 35, 48, 9, 21, 23, 24, 30, 25, 33, 31, 27]; 
+
+//a corresponding list of replacement values 
+var toList =  [100, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]; 
+
+// performs the reclassification
+var t_remap = image_t.remap({
+  from: fromList,
+  to: toList,
+  bandName: 'classification_1990'
+}); 
+
+//selecting the classes corresponding to natural vegetation
+var veg_class_t =  t_remap.eq(1)
+var veg_class_t_ =  t_remap.mask(t_remap.eq(1))
+//Map.addLayer(veg_class, null, 'veg_class_90') 
+
+//selecting the land cover map of the second year 
+var image_t1 = ee.Image('projects/mapbiomas-workspace/public/collection8/mapbiomas_collection80_integration_v1')
+                   .clip(roi) 
+                   .select('classification_1995'); 
+
+//performs the reclassification
+var no_veg_t1_ = image_t1.remap({
+  from: fromList,
+  to: toList,
+  bandName: 'classification_1995'
+}); 
+
+//selecting the classes corresponding to no natural vegetation
+var no_veg_t1 = no_veg_t1_.eq(2)
+//Map.addLayer(anthropic_uses_class, null, 'anthropic_uses_class') 
+
+//sum the first reclassified land use map with the second reclassified land use map
+var sum_img = veg_class_t.multiply(no_veg_t1)
+//Map.addLayer(sum_img) 
+
+//selecting the pixels classified as natural vegetation in the first map and 
+//as non-natural vegetation in the second map
+var deforestation = sum_img.mask(sum_img.eq(1))
+Map.addLayer(deforestation) 
+var def = deforestation.updateMask(no_veg_t1)
+
+////////////////////Creating samples that represent vegetation suppression////////////////////
+var veg_suppression = deforestation
+    .stratifiedSample({
+      numPoints: 10000,
+      scale: 30, 
+      geometries: true})
+    .map(function(f) {
+        return f.set('class', 1)
+    }) 
+Map.addLayer(veg_suppression, null, 'veg_suppression') 
+
+////////////////////extract the values from the input data for each vegetation suporession sample ////////////////////
+var samples_values = cb.reduceRegions(veg_suppression, ee.Reducer.mean()); 
+
+//filter out null values from the vegetation suporession feature collection
+var samples_dataset = samples_values.randomColumn('random'); 
+var samples_no_nulls = samples_dataset.filter(
+  ee.Filter.notNull(samples_dataset.first().propertyNames())
+); 
+
+//exporting the samples with the values of the conditioning variables
+Export.table.toDrive({
+  collection: samples_no_nulls,
+  description: 'deforest_data_90-95',
+  folder: 'Amazon statistic',
+  fileFormat: 'csv'
+});
+
