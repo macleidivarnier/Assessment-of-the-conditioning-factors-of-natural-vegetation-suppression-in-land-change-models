@@ -5,3 +5,4 @@ Link to application in a study area in the Brazilian Amazon biome: https://code.
 Link to application in a study area in the Brazilian Cerrado biome: https://code.earthengine.google.com/50cc2b79d434363fb1fc499415ad3e38
 
 Link to application in a study area in the Brazilian Pampa biome: https://code.earthengine.google.com/26df87cacd76e0b95071da37e10249d0
+
